@@ -1,0 +1,32 @@
+{
+  "name": "veylnor-reel-generator",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "next": "14.2.35",
+    "server-only": "^0.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "web-audio-beat-detector": "^8.2.30",
+    "standardized-audio-context": "^25.3.71"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.39",
+    "tailwindcss": "^3.4.4",
+    "typescript": "^5.5.3"
+  }
+}
