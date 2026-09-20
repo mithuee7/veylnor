@@ -52,7 +52,8 @@ export default function SequenceEditor({
         shot = { status: j.status, shotStart: j.shotStart, shotEnd: j.shotEnd, note: j.note };
         shortShot = j.end - j.start + 0.03 < targetDuration;
       }
-    } catch { /* keep the safe default */ }
+    } catch { /* handled below */ }
+    if (!shot) shot = { status: "unverified", shotStart: 0, shotEnd: sourceEnd, note: "Shot analysis failed; this section was not checked for cuts." };
     onChange(items.map((it) => it.position === slot.position ? {
       ...it, category: nextClip.category, clip: nextClip, sourceStart, sourceEnd, targetDuration, shot, shortShot,
     } : it));

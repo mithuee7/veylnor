@@ -83,9 +83,21 @@ export async function buildReelSequence(args: BuildSequenceArgs): Promise<BuildS
   const usedIds = new Set(slots.map((slot) => slot.clip.id));
   let swaps = 0;
   const swappedPositions: number[] = [];
+  // BUG FIX: "unverified" used to be excluded from this swap pass entirely. When FFmpeg scene detection fails for
+  // a clip, getShotMap has zero real cut data for it, so pickWindow's "chosen" shot is really just the WHOLE clip
+  // treated as one fake shot -- there is no way to know a real cut isn't hiding inside the extracted window. The
+  // old code accepted that blind guess and rendered it (only warning afterward), which is precisely the kind of
+  // "cuts slip through" bug reported: it happened on whichever clip hit a transient detection failure (network
+  // hiccup, or the 60s FFmpeg timeout on this project's 512MB instance), not on every clip, so it looked random.
+  // Fix: treat "unverified" exactly like "no qualifying shot" and try other pool clips until one comes back "ok"
+  // (i.e. detection succeeded AND it has a real cut-free shot long enough). Only if every alternate also fails to
+  // verify do we fall back to the original clip's best-effort guess, same as before -- but now that is a last
+  // resort instead of the first response to a transient failure.
+  const swappedForUnverified: number[] = [];
   for (const slot of auto) {
     const status = slot.selection?.status;
-    if (status !== "short-shot" && status !== "clip-too-short") continue;
+    const reasonIsUnverified = status === "unverified";
+    if (status !== "short-shot" && status !== "clip-too-short" && !reasonIsUnverified) continue;
     const target = targets[slot.position - 1];
     const neighbours = () => [slots[slot.position - 2]?.clip, slots[slot.position]?.clip].filter(Boolean) as Clip[];
     const alternates = gen.pool.filter((clip) => !usedIds.has(clip.id) && (!clip.duration || Number(clip.duration) + 0.01 >= target)
@@ -99,18 +111,22 @@ export async function buildReelSequence(args: BuildSequenceArgs): Promise<BuildS
         usedIds.delete(slot.clip.id); usedIds.add(alt.id);
         slot.swappedFrom = slot.clip.filename;
         slot.clip = alt; slot.url = url; slot.selection = selection; swaps++;
-        console.log(`[pipeline] position ${slot.position}: "${slot.swappedFrom}" has no uninterrupted ${target.toFixed(2)}s shot; swapped for "${alt.filename}".`);
+        const reason = reasonIsUnverified ? "could not be scene-checked (detection failed)" : `has no uninterrupted ${target.toFixed(2)}s shot`;
+        console.log(`[pipeline] position ${slot.position}: "${slot.swappedFrom}" ${reason}; swapped for "${alt.filename}".`);
         swappedPositions.push(slot.position);
+        if (reasonIsUnverified) swappedForUnverified.push(slot.position);
         break;
       }
     }
   }
 
-  if (swappedPositions.length) warnings.push(`Position${swappedPositions.length === 1 ? "" : "s"} ${swappedPositions.sort((a, b) => a - b).join(", ")}: the AI's clip had no uninterrupted shot long enough for its slot, so the next best allowed clip with one was used.`);
+  const shortSwaps = swappedPositions.filter((p) => !swappedForUnverified.includes(p));
+  if (shortSwaps.length) warnings.push(`Position${shortSwaps.length === 1 ? "" : "s"} ${shortSwaps.sort((a, b) => a - b).join(", ")}: the AI's clip had no uninterrupted shot long enough for its slot, so the next best allowed clip with one was used.`);
+  if (swappedForUnverified.length) warnings.push(`Position${swappedForUnverified.length === 1 ? "" : "s"} ${swappedForUnverified.sort((a, b) => a - b).join(", ")}: scene detection failed on the AI's clip, so a clip that could be verified cut-free was used instead.`);
   const shortSlots = auto.filter((slot) => slot.selection?.status === "short-shot" || slot.selection?.status === "clip-too-short");
   if (shortSlots.length) warnings.push(`Position${shortSlots.length === 1 ? "" : "s"} ${shortSlots.map((s) => s.position).join(", ")}: no cut-free shot long enough exists in the chosen or alternative clips; the longest single shot is used and its last frame is held (shots are never combined).`);
   const unverified = auto.filter((slot) => slot.selection?.status === "unverified");
-  if (unverified.length) warnings.push(`Scene detection was unavailable for position${unverified.length === 1 ? "" : "s"} ${unverified.map((s) => s.position).join(", ")}; those sections could not be checked for cuts.`);
+  if (unverified.length) warnings.push(`Scene detection was unavailable for position${unverified.length === 1 ? "" : "s"} ${unverified.map((s) => s.position).join(", ")} even after trying alternate clips; that section could not be checked for cuts.`);
 
   const items: SequenceItem[] = slots.map((slot) => {
     const target = targets[slot.position - 1];
